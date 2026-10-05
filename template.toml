@@ -1,0 +1,214 @@
+schema = 1
+id = "node-vue"
+name = "Node + Vue"
+description = "A full-stack TypeScript web app: a Fastify 5 API and a Vue 3 single-page app (Vite, Vue Router, Pinia, Tailwind CSS 4) sharing one SQLite database through the built-in node:sqlite. A Notes example goes through every layer, from an SQL migration to a Pinia store and a page, with server and web tests and a zero-warning quality gate (ESLint, Prettier, vue-tsc, Vitest). Choose it for web apps, internal tools and prototypes that need a real backend; Docker can build the production container or run everything."
+category = "web"
+languages = ["node"]
+tags = ["fullstack", "typescript", "sqlite", "tailwind", "fastify", "vue", "spa"]
+stack = [
+  "Node.js 24+",
+  "Fastify 5",
+  "Vue 3",
+  "Vite 8",
+  "Vue Router 5",
+  "Pinia 4",
+  "Tailwind CSS 4",
+  "SQLite (node:sqlite)",
+  "TypeScript 5.9",
+  "Vitest 5",
+  "ESLint 10",
+]
+
+[requirements]
+node = ">=24"
+npm = ">=10"
+
+[env]
+APP_NAME = "{{ project.name }}"
+APP_SLUG = "{{ project.slug }}"
+DB_PATH = "data/{{ project.slug }}.sqlite"
+
+[ports]
+APP_PORT = 3000
+WEB_PORT = 5173
+
+[[set]]
+file = "package.json"
+path = ["name"]
+value = "{{ project.slug }}"
+
+[[set]]
+file = "package-lock.json"
+path = ["name"]
+value = "{{ project.slug }}"
+
+[[set]]
+file = "package-lock.json"
+path = ["packages", "", "name"]
+value = "{{ project.slug }}"
+
+[[setup]]
+label = "Install dependencies"
+run = "npm install"
+
+[commands.dev]
+label = "Dev"
+run = "npm run dev"
+long = true
+url = "http://localhost:${WEB_PORT}"
+primary = true
+
+[commands.build]
+label = "Build"
+run = "npm run build"
+
+[commands.start]
+label = "Start"
+run = "npm start"
+long = true
+url = "http://localhost:${APP_PORT}"
+
+[commands.test]
+label = "Test"
+run = "npm test"
+
+[commands.check]
+label = "Check"
+run = "npm run check"
+
+[commands.lint]
+label = "Lint"
+run = "npm run lint"
+
+[commands.db-migrate]
+label = "Migrate DB"
+run = "npm run db:migrate"
+
+# ---------------------------------------------------------------------------
+# Docker: how the project uses containers. The option replaces or adds commands.
+# ---------------------------------------------------------------------------
+
+[choices.docker]
+label = "Docker"
+description = "How the project uses Docker."
+default = "run"
+
+[choices.docker.options.none]
+label = "No Docker"
+description = "Everything runs on this Mac with Node.js."
+
+[choices.docker.options.run]
+label = "Docker to run the app"
+description = "Develop locally with Node.js; build and run the production container with Docker Compose."
+files = ["Dockerfile", "docker-compose.yml", ".dockerignore"]
+requirements = { docker = ">=24" }
+env = { COMPOSE_PROJECT_NAME = "{{ project.slug }}" }
+# Removes what verification (docker-build) or Docker up created: containers, volumes, local images.
+cleanup = "docker compose down --volumes --remove-orphans --rmi local"
+
+[choices.docker.options.run.commands.docker-up]
+label = "Docker up"
+run = "docker compose up --build"
+long = true
+url = "http://localhost:${APP_PORT}"
+
+[choices.docker.options.run.commands.docker-down]
+label = "Docker down"
+run = "docker compose down"
+
+[choices.docker.options.run.commands.docker-logs]
+label = "Docker logs"
+run = "docker compose logs -f"
+long = true
+
+[choices.docker.options.run.commands.docker-build]
+label = "Docker build"
+run = "docker compose build app"
+description = "Builds the production image without starting it."
+
+[choices.docker.options.full]
+label = "Everything in Docker"
+description = "Dependencies, the dev server, tests and builds run in containers; only Docker is needed on this Mac."
+files = ["Dockerfile", "docker-compose.yml", ".dockerignore"]
+requirements = { docker = ">=24" }
+drop_requirements = ["node", "npm"]
+env = { COMPOSE_PROJECT_NAME = "{{ project.slug }}" }
+setup = [{ label = "Install dependencies", run = "docker compose run --rm dev npm install" }]
+cleanup = "docker compose --profile dev down --volumes --remove-orphans --rmi local"
+preview = { message = "Everything runs in Docker: the API and the Vite dev server run in the dev container with hot reload. Open the link to try the app; the Notes page shows the example feature. Stop the preview when you are done." }
+
+[choices.docker.options.full.commands]
+dev = { run = "docker compose up dev" }
+build = { run = "docker compose run --rm dev npm run build" }
+start = { label = "Start (container)", run = "docker compose up --build app" }
+test = { run = "docker compose run --rm dev npm test" }
+check = { run = "docker compose run --rm dev npm run check" }
+lint = { run = "docker compose run --rm dev npm run lint" }
+db-migrate = { run = "docker compose run --rm dev npm run db:migrate" }
+docker-down = { label = "Docker down", run = "docker compose --profile dev down" }
+docker-logs = { label = "Docker logs", run = "docker compose --profile dev logs -f", long = true }
+docker-build = { label = "Docker build", run = "docker compose build app", description = "Builds the production image without starting it." }
+
+# Where containers keep the SQLite database (only when Docker is used).
+[choices.data]
+label = "Data storage"
+description = "Where containers keep the SQLite database."
+default = "volume"
+when = { docker = ["run", "full"] }
+
+[choices.data.options.volume]
+label = "Docker volume"
+description = "Managed by Docker, survives container rebuilds; `docker compose down -v` deletes it."
+env = { DOCKER_DATA = "data" }
+
+[choices.data.options.local]
+label = "Project folder"
+description = "The data/ folder of the project is mounted into containers; easy to inspect and back up."
+env = { DOCKER_DATA = "./data" }
+
+# docker-build exists only with Docker; the "none" variant skips it.
+[verify]
+commands = ["check", "build", "docker-build"]
+variants = [{ docker = "full", data = "local" }, { docker = "none" }]
+
+# Try the skeleton without creating a project (fastDev "Preview").
+[preview]
+command = "dev"
+message = "The API and the Vite dev server are running with hot reload. Open the link to try the app; the Notes page shows the example feature. Stop the preview when you are done."
+
+[updates]
+ecosystem = "npm"
+
+[translations.ru]
+"Node + Vue" = "Node + Vue"
+"A full-stack TypeScript web app: a Fastify 5 API and a Vue 3 single-page app (Vite, Vue Router, Pinia, Tailwind CSS 4) sharing one SQLite database through the built-in node:sqlite. A Notes example goes through every layer, from an SQL migration to a Pinia store and a page, with server and web tests and a zero-warning quality gate (ESLint, Prettier, vue-tsc, Vitest). Choose it for web apps, internal tools and prototypes that need a real backend; Docker can build the production container or run everything." = "Веб-приложение на TypeScript целиком: API на Fastify 5 и одностраничный фронтенд на Vue 3 (Vite, Vue Router, Pinia, Tailwind CSS 4) с общей базой SQLite через встроенный node:sqlite. Пример «Заметки» проходит через все слои, от SQL-миграции до Pinia-стора и страницы, с тестами сервера и фронтенда и проверкой качества без предупреждений (ESLint, Prettier, vue-tsc, Vitest). Подходит для веб-приложений, внутренних инструментов и прототипов с настоящим бэкендом; Docker может собрать продакшен-контейнер или запускать всё."
+"Docker" = "Docker"
+"How the project uses Docker." = "Как проект использует Docker."
+"No Docker" = "Без Docker"
+"Everything runs on this Mac with Node.js." = "Всё работает на этом Mac с Node.js."
+"Docker to run the app" = "Docker для запуска"
+"Develop locally with Node.js; build and run the production container with Docker Compose." = "Разработка локально с Node.js; продакшен-контейнер собирается и запускается через Docker Compose."
+"Docker up" = "Docker: запуск"
+"Docker down" = "Docker: остановка"
+"Docker logs" = "Docker: логи"
+"Docker build" = "Docker: сборка"
+"Builds the production image without starting it." = "Собирает продакшен-образ, не запуская его."
+"Everything in Docker" = "Всё в Docker"
+"Dependencies, the dev server, tests and builds run in containers; only Docker is needed on this Mac." = "Зависимости, dev-сервер, тесты и сборка работают в контейнерах; на этом Mac нужен только Docker."
+"Start (container)" = "Старт (контейнер)"
+"Install dependencies" = "Установка зависимостей"
+"Everything runs in Docker: the API and the Vite dev server run in the dev container with hot reload. Open the link to try the app; the Notes page shows the example feature. Stop the preview when you are done." = "Всё работает в Docker: API и dev-сервер Vite запущены в dev-контейнере с горячей перезагрузкой. Откройте ссылку, чтобы попробовать приложение: страница Notes показывает пример. Когда закончите, остановите превью."
+"Data storage" = "Хранение данных"
+"Where containers keep the SQLite database." = "Где контейнеры хранят базу SQLite."
+"Docker volume" = "Том Docker"
+"Managed by Docker, survives container rebuilds; `docker compose down -v` deletes it." = "Управляется Docker и переживает пересборку контейнеров; `docker compose down -v` удаляет его."
+"Project folder" = "Папка проекта"
+"The data/ folder of the project is mounted into containers; easy to inspect and back up." = "Папка data/ проекта монтируется в контейнеры: данные легко посмотреть и скопировать."
+"Dev" = "Dev"
+"Build" = "Сборка"
+"Start" = "Старт"
+"Test" = "Тесты"
+"Check" = "Проверка"
+"Lint" = "Линтер"
+"Migrate DB" = "Миграции БД"
+"The API and the Vite dev server are running with hot reload. Open the link to try the app; the Notes page shows the example feature. Stop the preview when you are done." = "API и dev-сервер Vite запущены с горячей перезагрузкой. Откройте ссылку, чтобы попробовать приложение: страница Notes показывает пример. Когда закончите, остановите превью."

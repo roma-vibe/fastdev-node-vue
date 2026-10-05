@@ -1,0 +1,178 @@
+# {{ project.name }} — agent guide
+
+Rules and workflows for AI coding agents working in this repository. Humans start with `README.md`.
+{%- if options.spec_md %}
+
+**Read `SPEC.md` first.** It defines what this project must do. If it is incomplete, complete it with the owner before building features, and keep it current as decisions are made.
+{%- endif %}
+
+## Stack
+
+- **Runtime:** Node.js ≥ 24 runs the server's TypeScript directly (type stripping). There is no server build step and no tsx/ts-node; `tsc` only type-checks.
+- **API:** Fastify 5 with JSON Schema validation; SQLite through the built-in `node:sqlite` (`DatabaseSync`, synchronous); plain SQL migrations; no ORM.
+- **Web:** Vue 3 (`<script setup lang="ts">`), Vite, Vue Router, Pinia, Tailwind CSS 4.
+- **Tooling:** npm workspaces (`server`, `web`), TypeScript 5.9 strict, ESLint flat config, Prettier, Vitest.
+
+## Project map
+
+```text
+.env / .env.example         All configuration (single source of truth); .env is git-ignored
+package.json                Root scripts, shared dev tooling, workspaces
+scripts/dev.ts              `npm run dev`: API + Vite together, prefixed output
+data/                       SQLite files (git-ignored)
+server/
+  src/index.ts              Server entry: config → database → migrations → buildApp → listen
+  src/migrate.ts            `npm run db:migrate` entry
+  src/app.ts                buildApp(): composition root, error and 404 handlers, SPA serving
+  src/config.ts             Reads and validates env into a typed Config (only place reading process.env)
+  src/errors.ts             HttpError, NotFoundError, BadRequestError
+  src/web.ts                Serves web/dist in production (history fallback in app.ts)
+  src/db/database.ts        openDatabase(): opens SQLite, sets pragmas
+  src/db/migrator.ts        runMigrations(): applies new files, records them in schema_migrations
+  src/db/migrations/        NNN_snake_case.sql
+  src/features/<feature>/   <feature>.types / .repository / .service / .schemas / .routes .ts
+  test/                     Vitest: Fastify inject() on a fresh in-memory database
+web/
+  index.html                %APP_NAME% is replaced at build time
+  vite.config.ts            envDir = project root, PUBLIC_ENV_KEYS whitelist, /api proxy, data/ not watched
+  vite/env.ts               readEnv(): the root .env read literally; %KEY% replacement in index.html
+  src/main.ts, src/App.vue  Bootstrap and layout
+  src/config.ts             appName (from import.meta.env.APP_NAME)
+  src/router/index.ts       Routes and page titles (meta.title)
+  src/api/                  http.ts (the only fetch) + one typed client per server feature
+  src/stores/               Pinia setup stores, one per domain
+  src/pages/                Route components (<Name>Page.vue)
+  src/components/           Presentational components: props in, events out
+  src/lib/                  Framework-free helpers (formatting, …)
+  src/styles/main.css       Tailwind entry and @theme tokens
+  test/                     Vitest (happy-dom): stores and components
+```
+
+## Architecture rules
+
+Every request goes through the same layers; each layer talks only to the next one:
+
+```text
+UI (page) → Pinia store → API client (web/src/api) → HTTP /api/* → route → service → repository → SQLite
+```
+
+- **Components** (`web/src/components`) are presentational: props in, events out, `v-model` via `defineModel`. They never use stores or the API.
+- **Pages** (`web/src/pages`) and `App.vue` read store state and call store actions. They never call the API client or `fetch`.
+- **Stores** (`web/src/stores`) own UI state and call the API client. Actions catch errors, expose them as state (`error`) and return a success flag.
+- **API clients** (`web/src/api/<feature>.ts`) are thin typed wrappers around `http.ts`, the only module that calls `fetch` (ESLint enforces this). Their types mirror the server types: change both sides together.
+- **Routes** (`<feature>.routes.ts`) declare URL, JSON Schemas (`<feature>.schemas.ts`) for params, body and responses, and status codes, then delegate to the service. No SQL, no business rules.
+- **Services** (`<feature>.service.ts`) hold business rules and throw `HttpError` subclasses. No Fastify objects, no SQL.
+- **Repositories** (`<feature>.repository.ts`) hold all SQL of a feature. Always prepared statements with `?` parameters (never interpolate values into SQL); map `snake_case` rows to `camelCase` domain objects.
+- **Wiring** happens only in `server/src/app.ts`: repositories → services → route plugins with a `/api/...` prefix.
+- **Errors:** every failed `/api` request returns `{ statusCode, error, message }`. 5xx details are logged, never sent to clients. Unknown `/api` routes return JSON 404; other GET routes return the SPA (production).
+
+## Commands
+{% if choices.docker == "full" %}
+**Everything runs in Docker.** Node.js is not needed on the host and `npm` must not be run there: dependencies live in Docker volumes and contain Linux builds of native packages. Run every command below inside the dev container:
+
+- `npm run dev` → `docker compose up dev` (API on {{ ports.APP_PORT }}, Vite on {{ ports.WEB_PORT }}, both published to the host);
+- any other `npm …` → `docker compose run --rm dev npm …` (e.g. `docker compose run --rm dev npm run check`);
+- `npm start` → `docker compose up --build app` (the production image).
+{% endif %}
+| Command | Use |
+| --- | --- |
+| `npm run dev` | API on `APP_PORT` ({{ ports.APP_PORT }}; restarts when `server/src` or `.env` change) + Vite with hot reload on `WEB_PORT` ({{ ports.WEB_PORT }}) |
+| `npm run build` | Type-check, then build the web app into `web/dist` |
+| `npm start` | Production server: API + built SPA on `APP_PORT` |
+| `npm test` | All tests (Vitest projects `server` and `web`); one file: `npx vitest run server/test/notes.test.ts` |
+| `npm run check` | **Quality gate:** lint + format check + typecheck + tests |
+| `npm run lint:fix` / `npm run format` | Auto-fix lint problems / format all files |
+| `npm run db:migrate` | Apply pending migrations (the server also applies them on start) |
+| `npm install <pkg> -w server` (or `-w web`) | Add a dependency to a workspace; the root holds shared dev tooling only |
+
+## Configuration and environment
+
+- One `.env` in the project root; `.env.example` lists every key with a comment and is committed. Never commit `.env` or print secret values.
+- The app name comes **only** from `APP_NAME` in `.env`. Never hardcode it: the server uses `config.appName`, the web app uses `appName` from `web/src/config.ts`, `web/index.html` uses `%APP_NAME%`.
+- `server/src/config.ts` is the only server module that reads `process.env`. To add a setting: add the key to `.env.example` and `.env`, parse and validate it in `loadConfig()`, add it to `Config`, and pass `config` where it is needed.
+- Only keys listed in `PUBLIC_ENV_KEYS` (`web/vite.config.ts`) reach the browser, as `import.meta.env.<KEY>`; declare their types in `web/src/env.d.ts`. The browser bundle is public: never expose secrets.
+- `.env` is parsed by dotenv loaders only (the server: `process.loadEnvFile`; `web/vite.config.ts`: `readEnv()` from `web/vite/env.ts`, Node's same parser; Docker Compose): single-quote values with spaces or quotes (`APP_NAME='My "Shop"'`) and never parse the file by hand. Values are never expanded (`$HOME` stays literal), so do not use Vite's `loadEnv` for them: it expands `$VAR` even in single quotes.
+- Paths in env (such as `DB_PATH`) are relative to the project root.
+- `npm run dev` restarts the API and Vite automatically when `.env` changes; restart `npm start` yourself.
+
+## How to
+
+### Add a feature (example: `tasks`)
+
+1. **Migration** `server/src/db/migrations/NNN_create_tasks.sql` (see below).
+2. **Server** folder `server/src/features/tasks/`:
+   - `tasks.types.ts`: domain type and input types.
+   - `tasks.repository.ts`: class with a `Database`; SQL only; row mapping.
+   - `tasks.service.ts`: class with the repository; business rules; throws `NotFoundError` / `BadRequestError`.
+   - `tasks.schemas.ts`: JSON Schemas `as const` for params, body (`additionalProperties: false`) and every response status.
+   - `tasks.routes.ts`: `FastifyPluginAsync<{ service: TasksService }>` using typed generics (`app.post<{ Body: CreateTaskInput }>`).
+3. **Wire** it in `server/src/app.ts`: `await app.register(tasksRoutes, { prefix: '/api/tasks', service: tasksService })`.
+4. **Server tests** `server/test/tasks.test.ts` with `createTestApp()` and `app.inject()`: happy paths, validation errors, 404s.
+5. **Web:** `web/src/api/tasks.ts` (types + client) → `web/src/stores/tasks.ts` → page, route and components → tests in `web/test/`.
+
+The Notes example is the reference for every layer: `server/src/features/notes/`, `web/src/api/notes.ts`, `web/src/stores/notes.ts`, `web/src/pages/NotesPage.vue`, `web/src/components/Note*.vue` and their tests. When it is no longer useful, remove all of these, its route and navigation link, and add a migration that drops the `notes` table.
+
+### Add a migration
+
+- Create `server/src/db/migrations/NNN_snake_case.sql` with the next free number (`002_add_tags.sql`). Numbers must be unique; files run in numeric order, each in its own transaction, and are recorded in `schema_migrations`.
+- Never edit, rename or delete a migration that may have run anywhere; write a new one instead.
+- Use `STRICT` tables, `INTEGER PRIMARY KEY` ids, `snake_case` columns, ISO 8601 UTC timestamps as `TEXT` (default `strftime('%Y-%m-%dT%H:%M:%fZ', 'now')`), and `REFERENCES … ON DELETE …` for relations (foreign keys are enabled).
+- Migrations run on server start and with `npm run db:migrate`; tests run them on `:memory:`.
+
+### Add a page
+
+1. Create `web/src/pages/<Name>Page.vue` with `<script setup lang="ts">`.
+2. Register it in `web/src/router/index.ts` with a `name`, `meta.title` and a lazy `component: () => import('@/pages/<Name>Page.vue')`.
+3. Add a navigation link in `web/src/components/AppHeader.vue` when needed.
+4. Get data from a store; move reusable UI into `web/src/components/`.
+
+### Add an API route to an existing feature
+
+Schema in `<feature>.schemas.ts` → repository method (if SQL is needed) → service method → route in `<feature>.routes.ts` → server test → client function in `web/src/api/<feature>.ts` → store action → web test.
+
+## Testing
+
+- `npm test` runs both Vitest projects: `server` (Node) and `web` (happy-dom).
+- **Server** (`server/test/*.test.ts`): `createTestApp()` from `test/helpers.ts` gives a fresh, migrated in-memory database per test; call the API with `app.inject()` and assert status codes and JSON bodies.
+- **Web** (`web/test/*.test.ts`): stores with `setActivePinia(createPinia())` and `vi.mock('@/api/<feature>.ts')`; components with `mount()` from `@vue/test-utils`, asserting rendered output and emitted events. Build-time helpers in `web/vite/` are tested next to them (`env.test.ts`, Node environment).
+- Every new feature or bug fix gets tests in the layer where the logic lives.
+
+## Definition of done
+
+1. `npm run check` passes with **zero** errors and warnings (lint, formatting, types, tests){% if choices.docker == "full" %} — run it as `docker compose run --rm dev npm run check`{% endif %}.
+2. `npm run build` succeeds{% if choices.docker != "none" %} and `docker compose build app` still builds the image when `Dockerfile`, dependencies or runtime files changed{% endif %}.
+3. New behaviour is covered by tests.
+4. Docs match the code: `.env.example`, `README.md`{% if options.spec_md %}, `SPEC.md`{% endif %} and this file are updated when commands, env keys, structure or rules change.
+
+## Conventions
+
+- TypeScript strict everywhere. No `any`, no `@ts-ignore`, no non-null assertions (`!`): narrow types instead.
+- Server code must be erasable TypeScript (Node type stripping): no `enum`, `namespace`, constructor parameter properties or decorators. Use union types and `as const` objects; private class fields as `#field`.
+- Imports of project files always include the file extension (`./notes.service.ts`, `@/stores/notes.ts`). Type-only imports use `import type` or inline `type` specifiers.
+- Web code imports from `web/src` through the `@/` alias.
+- Naming: server feature files `<feature>.<layer>.ts`; Vue components `PascalCase.vue`, pages `<Name>Page.vue`; stores `use<Name>Store`; API clients `<name>Api`; SQL `snake_case`, JSON and TypeScript `camelCase`.
+- Styling: Tailwind utility classes in component markup; dark mode through `dark:` variants (follows the OS setting); shared design tokens in `@theme` in `web/src/styles/main.css`.
+- Dependencies: prefer the platform (`node:*` modules, `fetch`) and existing packages; add a package only when it clearly pays off, to the workspace that uses it.
+- Let Prettier format (`npm run format`); do not hand-format or disable lint rules to get green.
+- Write code, comments, UI texts and docs in English.
+{% if choices.docker != "none" %}
+## Docker
+
+{% if choices.docker == "full" -%}
+Mode: **everything in Docker**. `docker-compose.yml` has two services:
+
+- `dev` (profile `dev`, image stage `dev` of `Dockerfile`): mounts the project folder at `/app`, keeps `node_modules` (root, `server/`, `web/`) in named volumes, runs as user `node`, publishes `APP_PORT` and `WEB_PORT` and sets `APP_HOST`/`WEB_HOST` to `0.0.0.0`. `docker compose up dev` runs `npm run dev` with hot reload; `docker compose run --rm dev npm …` runs any script. After changing dependencies run `docker compose run --rm dev npm install`.
+- `app`: the production image (see below), `docker compose up --build app`.
+{%- else -%}
+Mode: **Docker to run the app**. Development happens on the host with Node.js (`npm run dev`); Docker builds and runs the production container.
+{%- endif %}
+
+- `Dockerfile` (multi-stage, `node:24-alpine`): builds the web app with all dependencies, installs only the server's production dependencies for the runtime image, which runs `node server/src/index.ts` as user `node`. `.env` is never copied into the image.
+- `docker-compose.yml` reads `.env`: `COMPOSE_PROJECT_NAME` ({{ project.slug }}) names the stack, `APP_NAME` is a build argument for the web build, `APP_PORT` is published, and `APP_HOST` is forced to `0.0.0.0`.
+- **Data:** `DOCKER_DATA` in `.env` decides where containers keep the SQLite files (`/app/data`): {% if choices.data == "local" %}**`./data`** — the project's `data/` folder is mounted (current setting); set `DOCKER_DATA=data` to use a Docker volume instead.{% else %}**`data`** — the named volume `{{ project.slug }}_data` (current setting); `docker compose down -v` deletes it. Set `DOCKER_DATA=./data` to keep the files in the project's `data/` folder instead.{% endif %}
+- Commands: `docker compose up --build{% if choices.docker == "full" %} app{% endif %}`, `docker compose{% if choices.docker == "full" %} --profile dev{% endif %} logs -f`, `docker compose{% if choices.docker == "full" %} --profile dev{% endif %} down` (add `-v` to delete the volumes).
+- The runtime image contains only `package.json`, `server/package.json`, `server/src`, `web/dist` and the server's production `node_modules`. When the server needs more files at runtime, add `COPY` lines to `Dockerfile` (and check `.dockerignore`). Runtime dependencies of the server must be in `server/package.json` `dependencies`.
+{% endif %}
+---
+
+Bootstrapped from `{{ skeleton.id }} {{ skeleton.version }}`.

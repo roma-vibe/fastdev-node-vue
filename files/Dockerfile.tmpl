@@ -1,0 +1,51 @@
+# syntax=docker/dockerfile:1
+
+# ---- Build: install all dependencies and build the web app into web/dist ----
+FROM node:24-alpine AS build
+WORKDIR /app
+
+COPY package.json package-lock.json ./
+COPY server/package.json server/
+COPY web/package.json web/
+RUN npm ci --no-audit --no-fund
+
+COPY . .
+# The web build reads APP_NAME (docker-compose.yml passes it from .env; .env is never copied).
+ARG APP_NAME
+RUN test -n "$APP_NAME" || (echo "Build argument APP_NAME is required" >&2 && exit 1)
+RUN npm run build -w web
+
+{% if choices.docker == "full" -%}
+# ---- Development: `docker compose up dev`; sources are mounted, dependencies live in volumes ----
+FROM node:24-alpine AS dev
+WORKDIR /app
+# Volumes mounted on these folders take their ownership, so npm can write as user node.
+RUN mkdir -p node_modules server/node_modules web/node_modules data && chown -R node:node /app
+USER node
+CMD ["npm", "run", "dev"]
+
+{% endif -%}
+# ---- Production dependencies: only what the server workspace needs, no dev dependencies ----
+FROM node:24-alpine AS deps
+WORKDIR /app
+
+COPY package.json package-lock.json ./
+COPY server/package.json server/
+COPY web/package.json web/
+RUN npm ci --omit=dev --workspace=server --no-audit --no-fund
+
+# ---- Runtime: Node runs the server's TypeScript sources directly (type stripping) ----
+FROM node:24-alpine
+ENV NODE_ENV=production
+WORKDIR /app
+
+COPY package.json ./
+COPY --from=deps /app/node_modules ./node_modules
+COPY server/package.json server/
+COPY server/src server/src
+COPY --from=build /app/web/dist web/dist
+RUN mkdir -p data && chown node:node data
+
+USER node
+EXPOSE 3000
+CMD ["node", "server/src/index.ts"]
