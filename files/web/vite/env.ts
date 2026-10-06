@@ -14,7 +14,7 @@ export type Env = Record<string, string | undefined>;
  * (`process.loadEnvFile`), so both sides see exactly the same values: quoted values are taken
  * literally and `$VAR` is never expanded (Vite's `loadEnv` would expand it, even in single quotes).
  * Variables already set in the environment win, as on the server: the Docker build gets APP_NAME
- * as a build argument (the image has no .env), the dev container gets .env through `env_file`.
+ * as a build argument (the image has no .env).
  */
 export function readEnv(rootDir: string, environment: Env = process.env): Env {
   const file = join(rootDir, '.env');

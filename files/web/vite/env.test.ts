@@ -30,7 +30,7 @@ describe('readEnv', () => {
     });
   });
 
-  it('lets variables of the environment win (Docker build argument, env_file)', () => {
+  it('lets variables of the environment win (Docker build argument)', () => {
     const dir = folderWith(`APP_NAME='From .env'\nAPP_PORT=3000\n`);
 
     expect(readEnv(dir, { APP_NAME: 'From the environment' })).toEqual({

@@ -42,9 +42,10 @@ services:
     build:
       context: .
       target: dev
-    env_file: .env
+    # Like on the host, the app reads the mounted .env itself (no env_file, whose values would
+    # win over later edits of .env), and `npm run dev` sets NODE_ENV for the API only: a global
+    # NODE_ENV=development would make `npm run build` bundle the development build of Vue.
     environment:
-      NODE_ENV: development
       # Listen on all interfaces inside the container so the published ports work.
       APP_HOST: 0.0.0.0
       WEB_HOST: 0.0.0.0
