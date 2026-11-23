@@ -20,7 +20,10 @@ Rules and workflows for AI coding agents working in this repository. Humans star
 package.json                Root scripts, shared dev tooling, workspaces
 scripts/dev.ts              `npm run dev`: API + Vite together, prefixed output
 scripts/security.ts         `npm run security`: runs `secbase check` (part of `npm run check`)
+scripts/walls.ts            `npm run walls`: runs `walls check` (part of `npm run check`)
 secbase.json                secbase profile (web-public), ignored paths, allowed findings with reasons
+walls.json                  walls settings: ignored paths, allowed findings with reasons
+.walls/rules.json           project walls (data only), see Quality walls
 data/                       SQLite files (git-ignored)
 server/
   src/index.ts              Server entry: config → database → migrations → buildApp → listen
@@ -85,7 +88,8 @@ UI (page) → Pinia store → API client (web/src/api) → HTTP /api/* → route
 | `npm run build` | Type-check, then build the web app into `web/dist` |
 | `npm start` | Production server: API + built SPA on `APP_PORT` |
 | `npm test` | All tests (Vitest projects `server` and `web`); one file: `npx vitest run server/test/notes.test.ts` |
-| `npm run check` | **Quality gate:** lint + format check + typecheck + tests + security |
+| `npm run check` | **Quality gate:** lint + format check + typecheck + tests + walls + security |
+| `npm run walls` | `walls check` (see Quality walls) |
 | `npm run security` | `secbase check` (see Security) |
 | `npm run lint:fix` / `npm run format` | Auto-fix lint problems / format all files |
 | `npm run db:migrate` | Apply pending migrations (the server also applies them on start) |
@@ -145,7 +149,7 @@ Schema in `<feature>.schemas.ts` → repository method (if SQL is needed) → se
 
 ## Definition of done
 
-1. `npm run check` passes with **zero** errors and warnings (lint, formatting, types, tests, secbase){% if choices.docker == "full" %} — run it as `docker compose run --rm dev npm run check`{% endif %}.
+1. `npm run check` passes with **zero** errors and warnings (lint, formatting, types, tests, walls, secbase){% if choices.docker == "full" %} — run it as `docker compose run --rm dev npm run check`{% endif %}.
 2. `npm run build` succeeds{% if choices.docker != "none" %} and `docker compose build app` still builds the image when `Dockerfile`, dependencies or runtime files changed{% endif %}.
 3. New behaviour is covered by tests.
 4. Docs match the code: `.env.example`, `README.md`{% if options.spec_md %}, `SPEC.md`{% endif %} and this file are updated when commands, env keys, structure or rules change.
@@ -164,6 +168,15 @@ The project starts with secure defaults. **Never weaken them to make something w
 - **Adding auth** needs sign-in throttling, HttpOnly SameSite (and Secure) cookies, an `Origin` check on cookie-authenticated non-GET requests, and owner-scoped queries tested with two users.
 - Before touching auth, access, input, outbound, uploads or LLM features, read `secbase checklist <area>` (`auth`, `access`, `input`, `outbound`, `uploads`, `llm`).
 - `npm run check` ends with `npm run security` (`secbase check`, profile in `secbase.json`). Fix findings; an `allow` entry needs a real `reason`. Without secbase the step fails, in CI too (install: `npm link` in `~/Documents/secbase`); only `SECBASE_OPTIONAL=1` turns that into a skip with a notice{% if choices.docker == "full" %} (the `dev` container sets it because secbase is not in the image){% endif %}. Never set it to get a green check.
+
+## Quality walls
+
+`walls` is the model-free code-quality gate: fixed rules, same answer every time. `npm run check` includes `walls check` right before the security step; `npm run walls` runs it alone (`npm run walls -- --json` for the full report). Project settings are in `walls.json`, project walls in `.walls/rules.json`.
+
+- Never weaken the lint, tsc or clippy configuration (rules, `strict`, `--max-warnings`, `-D warnings`) and never add a suppression without a reason. A finding is silenced only with a `walls-ignore <rule>: <reason>` comment on its line or the line above; fix the cause first.
+- When a reviewer or the owner points out a mistake for the second time, do not write a note: add a project wall to `.walls/rules.json` (`id` `project/<name>`, `message`, `pattern`, `files` and a `reason` that names the incident), then fix the current hits.
+- `walls rules` lists the built-in rules; `walls rules --explain <id>` says why a rule exists. Do not edit `.walls/baseline.json` by hand: `walls baseline` rewrites it. Loosening the gate (a new `ignore` entry `{ "path", "reason" }` or `allow` entry in `walls.json`, a weaker project wall, a bigger baseline) is a `gate/loosened` error until the owner commits it: ask him instead.
+- Install walls once: `npm link` in `~/Documents/walls`. Without it the step fails, in CI too; only `WALLS_OPTIONAL=1` turns that into a skip with a notice{% if choices.docker == "full" %} (the `dev` container sets it because walls is not in the image){% endif %}. Never set it to get a green check.
 
 ## Conventions
 
@@ -185,7 +198,7 @@ Mode: **everything in Docker**. `docker-compose.yml` has two services:
 - `dev` (profile `dev`, image stage `dev` of `Dockerfile`): mounts the project folder at `/app`, keeps `node_modules` (root, `server/`, `web/`) in named volumes, runs as user `node`, publishes `APP_PORT` and `WEB_PORT` on the host's `127.0.0.1` and sets `APP_HOST`/`WEB_HOST` to `0.0.0.0`. `docker compose up dev` runs `npm run dev` with hot reload; `docker compose run --rm dev npm …` runs any script. After changing dependencies run `docker compose run --rm dev npm install`.
 - `app`: the production image (see below), `docker compose up --build app`.
 
-**Security gate:** secbase is not in the image, so the `dev` service sets `SECBASE_OPTIONAL=1` and `npm run check` in the container only prints `secbase skipped: …`. In this mode you must also run `npm run security` (or `secbase check`) on the host, where secbase is installed, before finishing.
+**Security and quality gates:** secbase and walls are not in the image, so the `dev` service sets `SECBASE_OPTIONAL=1` and `WALLS_OPTIONAL=1` and `npm run check` in the container only prints `secbase skipped: …` and `walls skipped: …`. In this mode you must also run `npm run walls` and `npm run security` on the host, where both are installed, before finishing.
 {%- else -%}
 Mode: **Docker to run the app**. Development happens on the host with Node.js (`npm run dev`); Docker builds and runs the production container.
 {%- endif %}

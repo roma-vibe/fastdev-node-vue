@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.2.0 — 2026-11-23
+
+_Not verified on the publishing machine: data=volume, docker=run: Docker >=24; data=local, docker=full: Docker >=24._
+
+- `npm run check` now runs the walls quality gate (silenced checks, loosened lint, skipped tests, stubs, swallowed errors, invented imports, drifting docs) before secbase.
+- Added walls.json and .walls/rules.json for project walls, and a Quality walls section in AGENTS.md.
+- WALLS_OPTIONAL=1 skips the gate only where the walls CLI cannot be installed (Docker).
+
 ## 1.1.0 — 2026-11-23
 
 _Not verified on the publishing machine: data=volume, docker=run: Docker >=24; data=local, docker=full: Docker >=24._

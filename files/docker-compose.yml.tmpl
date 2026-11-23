@@ -50,9 +50,10 @@ services:
       # Listen on all interfaces inside the container so the published ports work.
       APP_HOST: 0.0.0.0
       WEB_HOST: 0.0.0.0
-      # secbase is installed on the host, not in this image: `npm run check` here skips its
-      # security step with a notice. Run `npm run security` on the host too.
+      # secbase and walls are installed on the host, not in this image: `npm run check` here skips
+      # their steps with a notice. Run `npm run walls` and `npm run security` on the host too.
       SECBASE_OPTIONAL: '1'
+      WALLS_OPTIONAL: '1'
     ports:
       # Published on the host's loopback only: other machines on the network cannot reach them.
       - '127.0.0.1:${APP_PORT:-3000}:${APP_PORT:-3000}'

@@ -55,10 +55,8 @@ export function loadEnvFile(path: string = resolve(rootDir, '.env')): void {
   if (existsSync(path)) process.loadEnvFile(path);
 }
 
-/** Validates the environment and returns a typed config. Throws ConfigError listing every problem. */
-export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
-  const problems: string[] = [];
-
+/** Readers for one environment: each records its problems instead of throwing, so all are listed together. */
+function createReaders(env: NodeJS.ProcessEnv, problems: string[]) {
   const required = (key: string): string => {
     const value = env[key]?.trim();
     if (!value) {
@@ -120,6 +118,14 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     }
     return raw as T;
   };
+
+  return { required, port, positiveInt, httpUrl, hostList, oneOf };
+}
+
+/** Validates the environment and returns a typed config. Throws ConfigError listing every problem. */
+export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
+  const problems: string[] = [];
+  const { required, port, positiveInt, httpUrl, hostList, oneOf } = createReaders(env, problems);
 
   const appName = required('APP_NAME');
   const appSlug = required('APP_SLUG');
