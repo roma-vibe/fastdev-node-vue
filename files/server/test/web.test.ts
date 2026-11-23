@@ -2,6 +2,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { API_CSP, PAGE_CSP } from '../src/security-headers.ts';
 import { createTestApp, type TestContext } from './helpers.ts';
 
 describe('serving the built web app', () => {
@@ -27,6 +28,21 @@ describe('serving the built web app', () => {
     expect(index.headers['cache-control']).toBe('no-cache');
     expect(asset.statusCode).toBe(200);
     expect(asset.headers['cache-control']).toContain('immutable');
+  });
+
+  it('gives the page its CSP and every other file the locked-down one', async () => {
+    const index = await ctx.app.inject({ method: 'GET', url: '/' });
+    const fallback = await ctx.app.inject({
+      method: 'GET',
+      url: '/notes',
+      headers: { accept: 'text/html' },
+    });
+    const asset = await ctx.app.inject({ method: 'GET', url: '/assets/app-123.js' });
+
+    expect(index.headers['content-security-policy']).toBe(PAGE_CSP);
+    expect(fallback.headers['content-security-policy']).toBe(PAGE_CSP);
+    expect(asset.headers['content-security-policy']).toBe(API_CSP);
+    expect(index.headers['x-frame-options']).toBe('DENY');
   });
 
   it('falls back to index.html for client-side routes', async () => {

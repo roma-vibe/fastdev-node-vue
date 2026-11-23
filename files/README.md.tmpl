@@ -49,7 +49,8 @@ Run them in the dev container: `docker compose run --rm dev npm run <script>` (`
 | `npm run build`                     | Type-check everything and build the web app into `web/dist`                |
 | `npm start`                         | Serve the API and the built web app on `APP_PORT`                          |
 | `npm test`                          | Run all tests (Vitest: server and web)                                     |
-| `npm run check`                     | Lint, format check, type-check and tests — the quality gate before commits |
+| `npm run check`                     | Lint, format check, type-check, tests, security check: the quality gate    |
+| `npm run security`                  | `secbase check` (needs `secbase`: `npm link` in `~/Documents/secbase`)     |
 | `npm run lint` / `npm run lint:fix` | ESLint                                                                     |
 | `npm run format`                    | Format all files with Prettier                                             |
 | `npm run typecheck`                 | `vue-tsc --build` for the server, the web app and the scripts              |
@@ -63,8 +64,11 @@ All settings live in `.env` in the project root. It is git-ignored; `.env.exampl
 | --- | --- | --- |
 | `APP_NAME` | `{{ env.APP_NAME }}` | App name shown in the UI and returned by `GET /api/health` |
 | `APP_SLUG` | `{{ env.APP_SLUG }}` | Machine-friendly name |
-| `APP_HOST` | `localhost` | Interface the API binds to (`0.0.0.0` for all interfaces) |
+| `APP_HOST` | `127.0.0.1` | Interface the API binds to; loopback only (Docker Compose sets `0.0.0.0` inside containers) |
 | `APP_PORT` | `{{ ports.APP_PORT }}` | API port (`npm start` also serves the web app here) |
+| `PUBLIC_URL` | _(empty)_ | Public URL once published; an `https://` URL turns on HSTS; its host is accepted in `Host` |
+| `ALLOWED_HOSTS` | _(empty)_ | More host names the app answers to (comma-separated); other `Host` headers get 421 |
+| `MAX_BODY_BYTES` | `1048576` | Largest accepted request body (1 MiB) |
 | `WEB_PORT` | `{{ ports.WEB_PORT }}` | Vite dev server port |
 | `DB_PATH` | `{{ env.DB_PATH }}` | SQLite file, relative to the project root |
 | `LOG_LEVEL` | `info` | `fatal`, `error`, `warn`, `info`, `debug`, `trace` or `silent` |

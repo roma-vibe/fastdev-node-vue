@@ -18,7 +18,8 @@ services:
       # Listen on all interfaces inside the container.
       APP_HOST: 0.0.0.0
     ports:
-      - '${APP_PORT:-3000}:${APP_PORT:-3000}'
+      # Published on the host's loopback only: other machines on the network cannot reach it.
+      - '127.0.0.1:${APP_PORT:-3000}:${APP_PORT:-3000}'
     volumes:
       # SQLite files (DB_PATH=data/...): named volume or the project's data/ folder.
       - ${DOCKER_DATA:-data}:/app/data
@@ -49,9 +50,13 @@ services:
       # Listen on all interfaces inside the container so the published ports work.
       APP_HOST: 0.0.0.0
       WEB_HOST: 0.0.0.0
+      # secbase is installed on the host, not in this image: `npm run check` here skips its
+      # security step with a notice. Run `npm run security` on the host too.
+      SECBASE_OPTIONAL: '1'
     ports:
-      - '${APP_PORT:-3000}:${APP_PORT:-3000}'
-      - '${WEB_PORT:-5173}:${WEB_PORT:-5173}'
+      # Published on the host's loopback only: other machines on the network cannot reach them.
+      - '127.0.0.1:${APP_PORT:-3000}:${APP_PORT:-3000}'
+      - '127.0.0.1:${WEB_PORT:-5173}:${WEB_PORT:-5173}'
     volumes:
       # Sources from the project folder; dependencies stay in volumes (Linux builds of native packages).
       - .:/app

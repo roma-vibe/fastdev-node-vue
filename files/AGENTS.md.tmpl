@@ -19,14 +19,19 @@ Rules and workflows for AI coding agents working in this repository. Humans star
 .env / .env.example         All configuration (single source of truth); .env is git-ignored
 package.json                Root scripts, shared dev tooling, workspaces
 scripts/dev.ts              `npm run dev`: API + Vite together, prefixed output
+scripts/security.ts         `npm run security`: runs `secbase check` (part of `npm run check`)
+secbase.json                secbase profile (web-public), ignored paths, allowed findings with reasons
 data/                       SQLite files (git-ignored)
 server/
   src/index.ts              Server entry: config → database → migrations → buildApp → listen
   src/migrate.ts            `npm run db:migrate` entry
-  src/app.ts                buildApp(): composition root, error and 404 handlers, SPA serving
+  src/app.ts                buildApp(): composition root, body limit, Ajv options, error and 404 handlers, SPA serving
   src/config.ts             Reads and validates env into a typed Config (only place reading process.env)
   src/errors.ts             HttpError, NotFoundError, BadRequestError
+  src/security-headers.ts   Security headers and CSPs on every response (one onSend hook)
   src/web.ts                Serves web/dist in production (history fallback in app.ts)
+  src/lib/outbound.ts       safeFetch(): SSRF-safe requests to URLs from users, models, webhooks, third parties
+  src/lib/address-policy.ts classifyAddress(): which IP addresses are public
   src/db/database.ts        openDatabase(): opens SQLite, sets pragmas
   src/db/migrator.ts        runMigrations(): applies new files, records them in schema_migrations
   src/db/migrations/        NNN_snake_case.sql
@@ -64,13 +69,13 @@ UI (page) → Pinia store → API client (web/src/api) → HTTP /api/* → route
 - **Services** (`<feature>.service.ts`) hold business rules and throw `HttpError` subclasses. No Fastify objects, no SQL.
 - **Repositories** (`<feature>.repository.ts`) hold all SQL of a feature. Always prepared statements with `?` parameters (never interpolate values into SQL); map `snake_case` rows to `camelCase` domain objects.
 - **Wiring** happens only in `server/src/app.ts`: repositories → services → route plugins with a `/api/...` prefix.
-- **Errors:** every failed `/api` request returns `{ statusCode, error, message }`. 5xx details are logged, never sent to clients. Unknown `/api` routes return JSON 404; other GET routes return the SPA (production).
+- **Errors:** every failed `/api` request returns `{ statusCode, error, message }`; 5xx answers carry only `{ statusCode, error }`, their details are logged, never sent to clients. Unknown `/api` routes return a plain JSON 404; other GET routes return the SPA (production).
 
 ## Commands
 {% if choices.docker == "full" %}
 **Everything runs in Docker.** Node.js is not needed on the host and `npm` must not be run there: dependencies live in Docker volumes and contain Linux builds of native packages. Run every command below inside the dev container:
 
-- `npm run dev` → `docker compose up dev` (API on {{ ports.APP_PORT }}, Vite on {{ ports.WEB_PORT }}, both published to the host);
+- `npm run dev` → `docker compose up dev` (API on {{ ports.APP_PORT }}, Vite on {{ ports.WEB_PORT }}, both published on the host's `127.0.0.1` only);
 - any other `npm …` → `docker compose run --rm dev npm …` (e.g. `docker compose run --rm dev npm run check`);
 - `npm start` → `docker compose up --build app` (the production image).
 {% endif %}
@@ -80,7 +85,8 @@ UI (page) → Pinia store → API client (web/src/api) → HTTP /api/* → route
 | `npm run build` | Type-check, then build the web app into `web/dist` |
 | `npm start` | Production server: API + built SPA on `APP_PORT` |
 | `npm test` | All tests (Vitest projects `server` and `web`); one file: `npx vitest run server/test/notes.test.ts` |
-| `npm run check` | **Quality gate:** lint + format check + typecheck + tests |
+| `npm run check` | **Quality gate:** lint + format check + typecheck + tests + security |
+| `npm run security` | `secbase check` (see Security) |
 | `npm run lint:fix` / `npm run format` | Auto-fix lint problems / format all files |
 | `npm run db:migrate` | Apply pending migrations (the server also applies them on start) |
 | `npm install <pkg> -w server` (or `-w web`) | Add a dependency to a workspace; the root holds shared dev tooling only |
@@ -139,10 +145,25 @@ Schema in `<feature>.schemas.ts` → repository method (if SQL is needed) → se
 
 ## Definition of done
 
-1. `npm run check` passes with **zero** errors and warnings (lint, formatting, types, tests){% if choices.docker == "full" %} — run it as `docker compose run --rm dev npm run check`{% endif %}.
+1. `npm run check` passes with **zero** errors and warnings (lint, formatting, types, tests, secbase){% if choices.docker == "full" %} — run it as `docker compose run --rm dev npm run check`{% endif %}.
 2. `npm run build` succeeds{% if choices.docker != "none" %} and `docker compose build app` still builds the image when `Dockerfile`, dependencies or runtime files changed{% endif %}.
 3. New behaviour is covered by tests.
 4. Docs match the code: `.env.example`, `README.md`{% if options.spec_md %}, `SPEC.md`{% endif %} and this file are updated when commands, env keys, structure or rules change.
+
+## Security
+
+The project starts with secure defaults. **Never weaken them to make something work**: find the cause instead.
+
+- **Headers** (`server/src/security-headers.ts`): nosniff, `Referrer-Policy`, `X-Frame-Options: DENY`, COOP, `Permissions-Policy` on every response; CSP `default-src 'none'` on JSON and files, a `'self'`-only CSP on the built page (no inline scripts or styles, no `unsafe-eval`); HSTS when `PUBLIC_URL` is https (`new URL(...).protocol`).
+- **Exposure:** the API and Vite bind to `127.0.0.1` (`APP_HOST`); only Docker Compose sets `0.0.0.0`, inside containers, and publishes the ports on the host's `127.0.0.1` only. No CORS: the page and `/api` share one origin (Vite proxies `/api` in development). If another origin must call the API, add an explicit `ALLOWED_ORIGINS` list, never `*`.
+- **Host check** (`server/src/host-check.ts`, DNS rebinding): requests whose `Host` is not `localhost`, `127.0.0.1`, `[::1]` (any port), the `PUBLIC_URL` host or an `ALLOWED_HOSTS` entry get 421 before any route runs. When the app is published under a new name, set `PUBLIC_URL` or add the name to `ALLOWED_HOSTS`; never disable the check.
+- **Input:** body limit `MAX_BODY_BYTES` (1 MiB); body schemas use `additionalProperties: false`, and unknown fields are rejected with 400, not dropped (Ajv `removeAdditional: false` in `app.ts`).
+- **Errors:** only the app's own `HttpError` and Fastify's own errors (validation, `FST_*` codes) with a 4xx status show their message; every other error, and any status outside 400-599, becomes a bare 500. 5xx answers never contain messages or stacks; unknown routes get a plain JSON 404. Throw `HttpError` for answers the client should read.
+- **Outbound:** every URL from a user, a model, a webhook or a third party goes through `safeFetch()` (`server/src/lib/outbound.ts`), never `fetch`: http(s) only, ports 80/443, public addresses only (checked after DNS and on every redirect), 10 s and 5 MB caps. A redirect to another origin keeps only `accept`, `accept-language`, `user-agent` (and `content-type` with a kept body); `HTTP(S)_PROXY` is ignored on purpose.
+- **Builds:** no source maps in production (`build.sourcemap: false` in `web/vite.config.ts`).
+- **Adding auth** needs sign-in throttling, HttpOnly SameSite (and Secure) cookies, an `Origin` check on cookie-authenticated non-GET requests, and owner-scoped queries tested with two users.
+- Before touching auth, access, input, outbound, uploads or LLM features, read `secbase checklist <area>` (`auth`, `access`, `input`, `outbound`, `uploads`, `llm`).
+- `npm run check` ends with `npm run security` (`secbase check`, profile in `secbase.json`). Fix findings; an `allow` entry needs a real `reason`. Without secbase the step fails, in CI too (install: `npm link` in `~/Documents/secbase`); only `SECBASE_OPTIONAL=1` turns that into a skip with a notice{% if choices.docker == "full" %} (the `dev` container sets it because secbase is not in the image){% endif %}. Never set it to get a green check.
 
 ## Conventions
 
@@ -161,14 +182,16 @@ Schema in `<feature>.schemas.ts` → repository method (if SQL is needed) → se
 {% if choices.docker == "full" -%}
 Mode: **everything in Docker**. `docker-compose.yml` has two services:
 
-- `dev` (profile `dev`, image stage `dev` of `Dockerfile`): mounts the project folder at `/app`, keeps `node_modules` (root, `server/`, `web/`) in named volumes, runs as user `node`, publishes `APP_PORT` and `WEB_PORT` and sets `APP_HOST`/`WEB_HOST` to `0.0.0.0`. `docker compose up dev` runs `npm run dev` with hot reload; `docker compose run --rm dev npm …` runs any script. After changing dependencies run `docker compose run --rm dev npm install`.
+- `dev` (profile `dev`, image stage `dev` of `Dockerfile`): mounts the project folder at `/app`, keeps `node_modules` (root, `server/`, `web/`) in named volumes, runs as user `node`, publishes `APP_PORT` and `WEB_PORT` on the host's `127.0.0.1` and sets `APP_HOST`/`WEB_HOST` to `0.0.0.0`. `docker compose up dev` runs `npm run dev` with hot reload; `docker compose run --rm dev npm …` runs any script. After changing dependencies run `docker compose run --rm dev npm install`.
 - `app`: the production image (see below), `docker compose up --build app`.
+
+**Security gate:** secbase is not in the image, so the `dev` service sets `SECBASE_OPTIONAL=1` and `npm run check` in the container only prints `secbase skipped: …`. In this mode you must also run `npm run security` (or `secbase check`) on the host, where secbase is installed, before finishing.
 {%- else -%}
 Mode: **Docker to run the app**. Development happens on the host with Node.js (`npm run dev`); Docker builds and runs the production container.
 {%- endif %}
 
 - `Dockerfile` (multi-stage, `node:24-alpine`): builds the web app with all dependencies, installs only the server's production dependencies for the runtime image, which runs `node server/src/index.ts` as user `node`. `.env` is never copied into the image.
-- `docker-compose.yml` reads `.env`: `COMPOSE_PROJECT_NAME` ({{ project.slug }}) names the stack, `APP_NAME` is a build argument for the web build, `APP_PORT` is published, and `APP_HOST` is forced to `0.0.0.0`.
+- `docker-compose.yml` reads `.env`: `COMPOSE_PROJECT_NAME` ({{ project.slug }}) names the stack, `APP_NAME` is a build argument for the web build, `APP_PORT` is published on the host's `127.0.0.1` only, and `APP_HOST` is forced to `0.0.0.0` inside the container.
 - **Data:** `DOCKER_DATA` in `.env` decides where containers keep the SQLite files (`/app/data`): {% if choices.data == "local" %}**`./data`** — the project's `data/` folder is mounted (current setting); set `DOCKER_DATA=data` to use a Docker volume instead.{% else %}**`data`** — the named volume `{{ project.slug }}_data` (current setting); `docker compose down -v` deletes it. Set `DOCKER_DATA=./data` to keep the files in the project's `data/` folder instead.{% endif %}
 - Commands: `docker compose up --build{% if choices.docker == "full" %} app{% endif %}`, `docker compose{% if choices.docker == "full" %} --profile dev{% endif %} logs -f`, `docker compose{% if choices.docker == "full" %} --profile dev{% endif %} down` (add `-v` to delete the volumes).
 - The runtime image contains only `package.json`, `server/package.json`, `server/src`, `web/dist` and the server's production `node_modules`. When the server needs more files at runtime, add `COPY` lines to `Dockerfile` (and check `.dockerignore`). Runtime dependencies of the server must be in `server/package.json` `dependencies`.

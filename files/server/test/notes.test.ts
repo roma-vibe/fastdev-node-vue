@@ -88,6 +88,23 @@ describe('notes API', () => {
     expect(blank.json()).toMatchObject({ message: 'Title must not be blank' });
   });
 
+  it('rejects unknown body fields instead of dropping them', async () => {
+    const created = await ctx.app.inject({
+      method: 'POST',
+      url: '/api/notes',
+      payload: { title: 'Mine', ownerId: 2 },
+    });
+    const updated = await ctx.app.inject({
+      method: 'PATCH',
+      url: '/api/notes/1',
+      payload: { id: 5 },
+    });
+
+    expect(created.statusCode).toBe(400);
+    expect(created.json()).toMatchObject({ message: 'body must NOT have additional properties' });
+    expect(updated.statusCode).toBe(400);
+  });
+
   it('returns 404 for a missing note', async () => {
     const get = await ctx.app.inject({ method: 'GET', url: '/api/notes/999' });
     const remove = await ctx.app.inject({ method: 'DELETE', url: '/api/notes/999' });

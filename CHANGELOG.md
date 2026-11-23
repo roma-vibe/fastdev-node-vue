@@ -1,5 +1,16 @@
 # Changelog
 
+## 1.1.0 — 2026-11-23
+
+_Not verified on the publishing machine: data=volume, docker=run: Docker >=24; data=local, docker=full: Docker >=24._
+
+- Security headers on every response (strict CSP, HSTS behind https, nosniff, no framing) and no source maps in production builds.
+- Host check against DNS rebinding: only localhost, 127.0.0.1, [::1], the PUBLIC_URL host and ALLOWED_HOSTS are answered, others get 421.
+- Error handler shows messages only for the app's own and Fastify's errors; everything else is a bare 500.
+- Safe outbound HTTP helper safeFetch: public addresses only, redirects re-checked with secret headers dropped across origins, size and time caps.
+- npm run check ends with npm run security (secbase); without secbase it fails, only SECBASE_OPTIONAL=1 skips it with a notice.
+- Docker publishes ports on 127.0.0.1 only; production dependencies have no known vulnerabilities.
+
 ## 1.0.0 — 2026-10-05
 
 - Initial version: Fastify 5 API and Vue 3 SPA with SQLite (node:sqlite), Tailwind CSS 4, Pinia, Vue Router and TypeScript.

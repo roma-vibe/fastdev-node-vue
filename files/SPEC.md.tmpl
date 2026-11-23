@@ -47,15 +47,24 @@ One subsection per feature: a user story, testable acceptance criteria and edge 
 
 ## API
 
-<!-- Endpoints under /api: method, path, request body, response, error cases. Errors use { statusCode, error, message }. -->
+<!-- Endpoints under /api: method, path, request body, response, error cases. Errors use { statusCode, error, message } (5xx: no message). -->
 
 ## UI
 
 <!-- Pages and routes, navigation, the main flows, and empty / loading / error states. Light and dark themes follow the OS. -->
 
+## Security
+
+<!-- Keep it short and current; AGENTS.md "Security" lists the defaults that are already in place. -->
+
+- **Profile:** `web-public` (`secbase.json`). <!-- Change it only if the app is never reachable from other machines (web-local). -->
+- **Auth model:** none yet. <!-- Who signs in and how (password, magic link, OAuth, none); sessions; roles. -->
+- **Data ownership:** <!-- Which records belong to whom (e.g. a note belongs to its author); who may read, change and delete what. -->
+- **Public exposure:** local only. <!-- Where it runs and who can reach it: localhost, LAN, a published URL (PUBLIC_URL); which routes are public. -->
+
 ## Non-functional requirements
 
-<!-- Security (authentication, authorization, input validation, secrets), privacy, performance, accessibility, supported browsers, logging, backups of the SQLite database, deployment ({% if choices.docker != "none" %}Docker Compose{% else %}Node.js 24+ running `npm start`{% endif %}). -->
+<!-- Security details beyond the section above (secrets, retention), privacy, performance, accessibility, supported browsers, logging, backups of the SQLite database, deployment ({% if choices.docker != "none" %}Docker Compose{% else %}Node.js 24+ running `npm start`{% endif %}). -->
 
 ## Open questions
 

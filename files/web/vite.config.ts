@@ -24,8 +24,9 @@ export default defineConfig(() => {
 
   const apiPort = Number(env.APP_PORT || 3000);
   const webPort = Number(env.WEB_PORT || 5173);
-  // WEB_HOST is set to 0.0.0.0 by the dev container (docker-compose.yml) so its published port works.
-  const webHost = process.env.WEB_HOST || 'localhost';
+  // Loopback only. WEB_HOST is set to 0.0.0.0 only by the dev container (docker-compose.yml), so
+  // its published port works.
+  const webHost = process.env.WEB_HOST || '127.0.0.1';
 
   return {
     envDir: rootDir,
@@ -36,6 +37,8 @@ export default defineConfig(() => {
     resolve: {
       alias: { '@': fileURLToPath(new URL('./src', import.meta.url)) },
     },
+    // The page and /api share one origin (Vite proxies /api in development, the API server serves
+    // the build in production), so the API sends no CORS headers.
     server: {
       host: webHost,
       port: webPort,
@@ -52,6 +55,8 @@ export default defineConfig(() => {
     build: {
       outDir: 'dist',
       emptyOutDir: true,
+      // No source maps in production: the server would publish the original sources.
+      sourcemap: false,
     },
   };
 });
